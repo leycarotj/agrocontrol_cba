@@ -71,9 +71,20 @@ def buscar_lote(id_lote):
     return None
 
 def generar_id_movimiento():
-    """Genera IDs secuenciales para movimientos de inventario (ej. M0001)."""
     siguiente_num = len(movimientos) + 1
     return f"M{siguiente_num:04d}"
+
+def calcular_stock(codigo_producto):
+    """Calcula el stock disponible dinámicamente sumando ENTRADA y restando SALIDA."""
+    codigo_producto = codigo_producto.strip().upper()
+    stock = 0.0
+    for m in movimientos:
+        if m["producto_codigo"] == codigo_producto:
+            if m["tipo"] == "ENTRADA":
+                stock += m["cantidad"]
+            elif m["tipo"] == "SALIDA":
+                stock -= m["cantidad"]
+    return stock
 
 # --- MÓDULO PRODUCTOS ---
 
@@ -141,12 +152,13 @@ def consultar_productos():
         print("\nNo se encontraron productos activos que coincidan con la búsqueda.")
         return
 
-    print("\n" + "="*80)
-    print(f"{'CÓDIGO':<10} | {'NOMBRE':<25} | {'CATEGORÍA':<15} | {'PRECIO ($)':<12} | {'STK MIN':<8}")
-    print("="*80)
+    print("\n" + "="*95)
+    print(f"{'CÓDIGO':<10} | {'NOMBRE':<25} | {'CATEGORÍA':<15} | {'PRECIO ($)':<12} | {'STK MIN':<8} | {'STOCK ACTUAL':<12}")
+    print("="*95)
     for p in encontrados:
-        print(f"{p['codigo']:<10} | {p['nombre']:<25} | {p['categoria']:<15} | {p['precio']:<12.2f} | {p['stock_minimo']:<8.1f}")
-    print("="*80)
+        stk_actual = calcular_stock(p["codigo"])
+        print(f"{p['codigo']:<10} | {p['nombre']:<25} | {p['categoria']:<15} | {p['precio']:<12.2f} | {p['stock_minimo']:<8.1f} | {stk_actual:<12.1f}")
+    print("="*95)
 
 def actualizar_producto():
     print("--- [RF03] Actualizar Producto ---")
@@ -250,7 +262,7 @@ def menu_productos():
             print("\nOpción no válida.")
             pausar()
 
-# --- MÓDULO LOTES PRODUCTIVOS (RF05 - RF07) ---
+# --- MÓDULO LOTES PRODUCTIVOS ---
 
 def registrar_lote():
     print("--- [RF05] Registrar Lote Productivo ---")
@@ -368,11 +380,9 @@ def cosechar_lote():
         print("Error: Debe ingresar un número válido para la cantidad.")
         return
 
-    # Actualizar estado del lote
     lote["cantidad_producida"] = cantidad
     lote["estado"] = "COSECHADO"
 
-    # Generar ENTRADA automática de inventario
     nuevo_movimiento = {
         "id": generar_id_movimiento(),
         "producto_codigo": lote["producto_codigo"],
@@ -385,7 +395,7 @@ def cosechar_lote():
     movimientos.append(nuevo_movimiento)
     guardar_todos_los_datos()
     print(f"\n¡Cosecha registrada con éxito!")
-    print(f"Se generó automáticamente el movimiento de entrada {nuevo_movimiento['id']} de {cantidad} unidades para el producto {lote['producto_codigo']}.")
+    print(f"Se generó automáticamente el movimiento {nuevo_movimiento['id']} (ENTRADA) por {cantidad} unidades.")
 
 def menu_lotes():
     while True:
@@ -421,6 +431,135 @@ def menu_lotes():
             print("\nOpción no válida.")
             pausar()
 
+# --- MÓDULO MOVIMIENTOS DE INVENTARIO (RF08 - RF09) ---
+
+def registrar_entrada_inventario():
+    print("--- [RF08] Registrar Entrada de Inventario Manual ---")
+    codigo_prod = input("Código del producto: ").strip().upper()
+    prod = buscar_producto(codigo_prod)
+
+    if not prod:
+        print(f"Error: No existe el producto '{codigo_prod}'.")
+        return
+
+    if not prod["activo"]:
+        print(f"Error: El producto '{prod['nombre']}' está DESACTIVADO.")
+        return
+
+    try:
+        cantidad = float(input("Cantidad a ingresar: "))
+        if cantidad <= 0:
+            print("Error: La cantidad debe ser mayor a 0.")
+            return
+    except ValueError:
+        print("Error: Debe ingresar un valor numérico.")
+        return
+
+    motivo = input("Motivo de la entrada (OBLIGATORIO): ").strip()
+    if not motivo:
+        print("Error: El motivo de la entrada es obligatorio.")
+        return
+
+    nuevo_movimiento = {
+        "id": generar_id_movimiento(),
+        "producto_codigo": codigo_prod,
+        "tipo": "ENTRADA",
+        "cantidad": cantidad,
+        "motivo": motivo,
+        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+    }
+
+    movimientos.append(nuevo_movimiento)
+    guardar_todos_los_datos()
+    stock_nuevo = calcular_stock(codigo_prod)
+    print(f"\n¡Entrada {nuevo_movimiento['id']} registrada con éxito! Nuevo stock de {prod['nombre']}: {stock_nuevo}")
+
+def registrar_salida_inventario():
+    print("--- [RF09] Registrar Salida de Inventario Manual ---")
+    codigo_prod = input("Código del producto: ").strip().upper()
+    prod = buscar_producto(codigo_prod)
+
+    if not prod:
+        print(f"Error: No existe el producto '{codigo_prod}'.")
+        return
+
+    stock_disponible = calcular_stock(codigo_prod)
+    print(f"Producto: {prod['nombre']} | Stock actual disponible: {stock_disponible}")
+
+    try:
+        cantidad = float(input("Cantidad a retirar: "))
+        if cantidad <= 0:
+            print("Error: La cantidad debe ser mayor a 0.")
+            return
+    except ValueError:
+        print("Error: Debe ingresar un valor numérico.")
+        return
+
+    # Validar stock suficiente (PF005)
+    if cantidad > stock_disponible:
+        print(f"\nError (PF005): Stock insuficiente. Intenta retirar {cantidad} pero solo hay {stock_disponible} disponibles. Operación denegada.")
+        return
+
+    motivo = input("Motivo de la salida (ej. merma, donación, autoconsumo): ").strip()
+    if not motivo:
+        motivo = "Salida manual de inventario"
+
+    nuevo_movimiento = {
+        "id": generar_id_movimiento(),
+        "producto_codigo": codigo_prod,
+        "tipo": "SALIDA",
+        "cantidad": cantidad,
+        "motivo": motivo,
+        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+    }
+
+    movimientos.append(nuevo_movimiento)
+    guardar_todos_los_datos()
+    stock_nuevo = calcular_stock(codigo_prod)
+    print(f"\n¡Salida {nuevo_movimiento['id']} registrada con éxito! Stock restante de {prod['nombre']}: {stock_nuevo}")
+
+def consultar_movimientos():
+    print("--- Historial de Movimientos de Inventario ---")
+    if not movimientos:
+        print("\nNo existen movimientos de inventario registrados.")
+        return
+
+    print("\n" + "="*95)
+    print(f"{'ID MOV':<8} | {'FECHA':<16} | {'CÓD PROD':<10} | {'TIPO':<10} | {'CANTIDAD':<10} | {'MOTIVO':<30}")
+    print("="*95)
+    for m in movimientos:
+        print(f"{m['id']:<8} | {m['fecha']:<16} | {m['producto_codigo']:<10} | {m['tipo']:<10} | {m['cantidad']:<10.1f} | {m['motivo']:<30}")
+    print("="*95)
+
+def menu_movimientos():
+    while True:
+        limpiar_pantalla()
+        print("==================== MOVIMIENTOS DE INVENTARIO ====================")
+        print("1. Registrar Entrada manual")
+        print("2. Registrar Salida manual")
+        print("3. Consultar historial de movimientos")
+        print("0. Volver al menú principal")
+        print("===================================================================")
+        opcion = input("Seleccione una opción: ").strip()
+
+        if opcion == "1":
+            limpiar_pantalla()
+            registrar_entrada_inventario()
+            pausar()
+        elif opcion == "2":
+            limpiar_pantalla()
+            registrar_salida_inventario()
+            pausar()
+        elif opcion == "3":
+            limpiar_pantalla()
+            consultar_movimientos()
+            pausar()
+        elif opcion == "0":
+            break
+        else:
+            print("\nOpción no válida.")
+            pausar()
+
 # --- MENÚ PRINCIPAL ---
 
 def mostrar_menu():
@@ -448,8 +587,7 @@ def main():
         elif opcion == "2":
             menu_lotes()
         elif opcion == "3":
-            print("\n--- [3] Movimientos de inventario ---")
-            pausar()
+            menu_movimientos()
         elif opcion == "4":
             print("\n--- [4] Registrar venta ---")
             pausar()
