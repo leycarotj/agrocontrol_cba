@@ -1,6 +1,7 @@
 import os
 import json
 from pathlib import Path
+from datetime import datetime
 
 # Rutas de almacenamiento
 DATA_DIR = Path("data")
@@ -15,6 +16,7 @@ lotes = []
 movimientos = []
 ventas = []
 
+# --- PERSISTENCIA JSON ---
 
 def garantizar_directorio():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -46,7 +48,7 @@ def guardar_todos_los_datos():
     guardar_json(movimientos, MOVIMIENTOS_FILE)
     guardar_json(ventas, VENTAS_FILE)
 
-# --- AUXILIARES INTERFAZ ---
+# --- AUXILIARES E INTERFAZ ---
 
 def limpiar_pantalla():
     os.system('cls' if os.name == 'nt' else 'clear')
@@ -61,7 +63,19 @@ def buscar_producto(codigo):
             return prod
     return None
 
-# --- MÓDULO PRODUCTOS (RF01 - RF04) ---
+def buscar_lote(id_lote):
+    id_lote = id_lote.strip().upper()
+    for l in lotes:
+        if l["id_lote"] == id_lote:
+            return l
+    return None
+
+def generar_id_movimiento():
+    """Genera IDs secuenciales para movimientos de inventario (ej. M0001)."""
+    siguiente_num = len(movimientos) + 1
+    return f"M{siguiente_num:04d}"
+
+# --- MÓDULO PRODUCTOS ---
 
 def registrar_producto():
     print("--- [RF01] Registrar Producto ---")
@@ -236,6 +250,177 @@ def menu_productos():
             print("\nOpción no válida.")
             pausar()
 
+# --- MÓDULO LOTES PRODUCTIVOS (RF05 - RF07) ---
+
+def registrar_lote():
+    print("--- [RF05] Registrar Lote Productivo ---")
+    id_lote = input("ID del lote (ej. L001): ").strip().upper()
+    if not id_lote:
+        print("Error: El ID del lote no puede estar vacío.")
+        return
+
+    if buscar_lote(id_lote):
+        print(f"Error: El lote con ID '{id_lote}' ya está registrado.")
+        return
+
+    codigo_prod = input("Código del producto asociado: ").strip().upper()
+    prod = buscar_producto(codigo_prod)
+
+    if not prod:
+        print(f"Error: El producto '{codigo_prod}' no existe.")
+        return
+
+    if not prod["activo"]:
+        print(f"Error: El producto '{prod['nombre']}' se encuentra DESACTIVADO. No puede asociarse a nuevos lotes.")
+        return
+
+    fecha_siembra = input("Fecha de siembra (AAAA-MM-DD) [dejar vacío para fecha actual]: ").strip()
+    if not fecha_siembra:
+        fecha_siembra = datetime.now().strftime("%Y-%m-%d")
+
+    try:
+        area_m2 = float(input("Área en m²: "))
+        if area_m2 <= 0:
+            print("Error: El área debe ser mayor a 0.")
+            return
+    except ValueError:
+        print("Error: Debe ingresar un valor numérico para el área.")
+        return
+
+    nuevo_lote = {
+        "id_lote": id_lote,
+        "producto_codigo": codigo_prod,
+        "fecha_siembra": fecha_siembra,
+        "area_m2": area_m2,
+        "cantidad_producida": 0.0,
+        "estado": "EN_PRODUCCION"
+    }
+
+    lotes.append(nuevo_lote)
+    guardar_todos_los_datos()
+    print(f"\n¡Lote '{id_lote}' asociado a '{prod['nombre']}' registrado exitosamente!")
+
+def consultar_lotes():
+    print("--- Consultar Lotes Productivos ---")
+    if not lotes:
+        print("\nNo hay lotes productivos registrados.")
+        return
+
+    print("\n" + "="*85)
+    print(f"{'ID LOTE':<10} | {'PROD CÓD':<10} | {'SIEMBRA':<12} | {'ÁREA (m²)':<10} | {'CANT PROD':<10} | {'ESTADO':<15}")
+    print("="*85)
+    for l in lotes:
+        print(f"{l['id_lote']:<10} | {l['producto_codigo']:<10} | {l['fecha_siembra']:<12} | {l['area_m2']:<10.1f} | {l['cantidad_producida']:<10.1f} | {l['estado']:<15}")
+    print("="*85)
+
+def cambiar_estado_lote():
+    print("--- [RF06] Cambiar Estado de Lote ---")
+    id_lote = input("Ingrese el ID del lote: ").strip().upper()
+    lote = buscar_lote(id_lote)
+
+    if not lote:
+        print(f"Error (PF003): No existe el lote '{id_lote}'.")
+        return
+
+    if lote["estado"] == "COSECHADO":
+        print("Error (PF004): El lote ya fue COSECHADO. No se puede modificar su estado.")
+        return
+
+    print(f"\nEstado actual del lote {id_lote}: {lote['estado']}")
+    print("1. CANCELADO")
+    print("2. Volver a EN_PRODUCCION")
+    opc = input("Seleccione nuevo estado: ").strip()
+
+    if opc == "1":
+        lote["estado"] = "CANCELADO"
+        guardar_todos_los_datos()
+        print(f"\nLote '{id_lote}' cambiado a CANCELADO.")
+    elif opc == "2":
+        lote["estado"] = "EN_PRODUCCION"
+        guardar_todos_los_datos()
+        print(f"\nLote '{id_lote}' restablecido a EN_PRODUCCION.")
+    else:
+        print("Opción cancelada.")
+
+def cosechar_lote():
+    print("--- [RF07] Cosechar Lote Productivo ---")
+    id_lote = input("Ingrese el ID del lote a cosechar: ").strip().upper()
+    lote = buscar_lote(id_lote)
+
+    if not lote:
+        print(f"Error (PF003): El lote '{id_lote}' no existe.")
+        return
+
+    if lote["estado"] == "COSECHADO":
+        print(f"Error (PF004): El lote '{id_lote}' ya fue cosechado previamente. Operación rechazada.")
+        return
+
+    if lote["estado"] == "CANCELADO":
+        print(f"Error: El lote '{id_lote}' está CANCELADO. No se puede cosechar.")
+        return
+
+    try:
+        cantidad = float(input("Cantidad cosechada / producida: "))
+        if cantidad <= 0:
+            print("Error: La cantidad debe ser mayor a 0.")
+            return
+    except ValueError:
+        print("Error: Debe ingresar un número válido para la cantidad.")
+        return
+
+    # Actualizar estado del lote
+    lote["cantidad_producida"] = cantidad
+    lote["estado"] = "COSECHADO"
+
+    # Generar ENTRADA automática de inventario
+    nuevo_movimiento = {
+        "id": generar_id_movimiento(),
+        "producto_codigo": lote["producto_codigo"],
+        "tipo": "ENTRADA",
+        "cantidad": cantidad,
+        "motivo": f"Cosecha lote {id_lote}",
+        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M")
+    }
+
+    movimientos.append(nuevo_movimiento)
+    guardar_todos_los_datos()
+    print(f"\n¡Cosecha registrada con éxito!")
+    print(f"Se generó automáticamente el movimiento de entrada {nuevo_movimiento['id']} de {cantidad} unidades para el producto {lote['producto_codigo']}.")
+
+def menu_lotes():
+    while True:
+        limpiar_pantalla()
+        print("==================== GESTIÓN DE LOTES ====================")
+        print("1. Registrar lote productivo")
+        print("2. Consultar lotes")
+        print("3. Cambiar estado de lote")
+        print("4. Cosechar lote")
+        print("0. Volver al menú principal")
+        print("==========================================================")
+        opcion = input("Seleccione una opción: ").strip()
+
+        if opcion == "1":
+            limpiar_pantalla()
+            registrar_lote()
+            pausar()
+        elif opcion == "2":
+            limpiar_pantalla()
+            consultar_lotes()
+            pausar()
+        elif opcion == "3":
+            limpiar_pantalla()
+            cambiar_estado_lote()
+            pausar()
+        elif opcion == "4":
+            limpiar_pantalla()
+            cosechar_lote()
+            pausar()
+        elif opcion == "0":
+            break
+        else:
+            print("\nOpción no válida.")
+            pausar()
+
 # --- MENÚ PRINCIPAL ---
 
 def mostrar_menu():
@@ -261,8 +446,7 @@ def main():
         if opcion == "1":
             menu_productos()
         elif opcion == "2":
-            print("\n--- [2] Gestión de lotes productivos ---")
-            pausar()
+            menu_lotes()
         elif opcion == "3":
             print("\n--- [3] Movimientos de inventario ---")
             pausar()
