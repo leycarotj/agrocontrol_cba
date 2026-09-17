@@ -74,8 +74,12 @@ def generar_id_movimiento():
     siguiente_num = len(movimientos) + 1
     return f"M{siguiente_num:04d}"
 
+def generar_id_venta():
+    """Genera IDs secuenciales para las ventas (ej. V0001)."""
+    siguiente_num = len(ventas) + 1
+    return f"V{siguiente_num:04d}"
+
 def calcular_stock(codigo_producto):
-    """Calcula el stock disponible dinámicamente sumando ENTRADA y restando SALIDA."""
     codigo_producto = codigo_producto.strip().upper()
     stock = 0.0
     for m in movimientos:
@@ -431,7 +435,7 @@ def menu_lotes():
             print("\nOpción no válida.")
             pausar()
 
-# --- MÓDULO MOVIMIENTOS DE INVENTARIO (RF08 - RF09) ---
+# --- MÓDULO MOVIMIENTOS DE INVENTARIO ---
 
 def registrar_entrada_inventario():
     print("--- [RF08] Registrar Entrada de Inventario Manual ---")
@@ -495,7 +499,6 @@ def registrar_salida_inventario():
         print("Error: Debe ingresar un valor numérico.")
         return
 
-    # Validar stock suficiente (PF005)
     if cantidad > stock_disponible:
         print(f"\nError (PF005): Stock insuficiente. Intenta retirar {cantidad} pero solo hay {stock_disponible} disponibles. Operación denegada.")
         return
@@ -560,6 +563,127 @@ def menu_movimientos():
             print("\nOpción no válida.")
             pausar()
 
+# --- MÓDULO VENTAS (RF10 - RF11) ---
+
+def registrar_venta():
+    print("--- [RF10 - RF11] Registrar Nueva Venta ---")
+    items_venta = []
+    total_venta = 0.0
+
+    while True:
+        codigo_prod = input("\nIngrese código de producto a agregar (o presione ENTER para finalizar): ").strip().upper()
+        if not codigo_prod:
+            break
+
+        prod = buscar_producto(codigo_prod)
+        if not prod:
+            print(f"Error: Producto con código '{codigo_prod}' no existe.")
+            continue
+
+        if not prod["activo"]:
+            print(f"Error: El producto '{prod['nombre']}' está DESACTIVADO.")
+            continue
+
+        stock_disponible = calcular_stock(codigo_prod)
+        
+        # Descontar lo que ya esté agregándose en el carrito actual
+        cant_ya_agregada = sum(item["cantidad"] for item in items_venta if item["codigo"] == codigo_prod)
+        stock_efectivo = stock_disponible - cant_ya_agregada
+
+        print(f"Producto: {prod['nombre']} | Precio: ${prod['precio']:.2f} | Stock disponible: {stock_efectivo}")
+
+        try:
+            cantidad = float(input("Cantidad a vender: "))
+            if cantidad <= 0:
+                print("Error: La cantidad debe ser mayor a 0.")
+                continue
+        except ValueError:
+            print("Error: Ingrese una cantidad numérica válida.")
+            continue
+
+        if cantidad > stock_efectivo:
+            print(f"Error: Cantidad excede el stock disponible ({stock_efectivo}).")
+            continue
+
+        subtotal = cantidad * prod["precio"]
+        
+        items_venta.append({
+            "codigo": prod["codigo"],
+            "nombre": prod["nombre"],
+            "cantidad": cantidad,
+            "precio_unitario": prod["precio"],
+            "subtotal": subtotal
+        })
+
+        total_venta += subtotal
+        print(f"-> Agregado: {cantidad} x {prod['nombre']} = ${subtotal:.2f}")
+
+        otra = input("¿Desea agregar otro producto a la venta? (s/n): ").strip().lower()
+        if otra != 's':
+            break
+
+    if not items_venta:
+        print("\nVenta cancelada: No se ingresó ningún producto válido.")
+        return
+
+    # Confirmar y Procesar Venta
+    id_venta = generar_id_venta()
+    fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    nueva_venta = {
+        "id": id_venta,
+        "fecha": fecha_venta,
+        "items": [
+            {
+                "codigo": it["codigo"],
+                "cantidad": it["cantidad"],
+                "precio_unitario": it["precio_unitario"]
+            } for it in items_venta
+        ],
+        "total": total_venta
+    }
+
+    ventas.append(nueva_venta)
+
+    # Generar salidas de inventario asociadas
+    for it in items_venta:
+        mov = {
+            "id": generar_id_movimiento(),
+            "producto_codigo": it["codigo"],
+            "tipo": "SALIDA",
+            "cantidad": it["cantidad"],
+            "motivo": f"Venta {id_venta}",
+            "fecha": fecha_venta
+        }
+        movimientos.append(mov)
+
+    guardar_todos_los_datos()
+
+    print("\n" + "="*60)
+    print(f"           COMPROBANTE DE VENTA {id_venta}")
+    print(f"Fecha: {fecha_venta}")
+    print("="*60)
+    for it in items_venta:
+        print(f"{it['nombre']:<25} | {it['cantidad']:>5.1f} x ${it['precio_unitario']:<8.2f} = ${it['subtotal']:>8.2f}")
+    print("-" * 60)
+    print(f"TOTAL DE LA VENTA: ${total_venta:.2f}")
+    print("="*60)
+    print("¡Venta registrada exitosamente!")
+
+def consultar_ventas():
+    print("--- [RF14] Consultar Ventas Registradas ---")
+    if not ventas:
+        print("\nNo existen ventas registradas en el sistema.")
+        return
+
+    print("\n" + "="*70)
+    print(f"{'ID VENTA':<10} | {'FECHA':<18} | {'Nº ÍTEMS':<10} | {'TOTAL ($)':<15}")
+    print("="*70)
+    for v in ventas:
+        num_items = len(v["items"])
+        print(f"{v['id']:<10} | {v['fecha']:<18} | {num_items:<10} | ${v['total']:<15.2f}")
+    print("="*70)
+
 # --- MENÚ PRINCIPAL ---
 
 def mostrar_menu():
@@ -589,10 +713,12 @@ def main():
         elif opcion == "3":
             menu_movimientos()
         elif opcion == "4":
-            print("\n--- [4] Registrar venta ---")
+            limpiar_pantalla()
+            registrar_venta()
             pausar()
         elif opcion == "5":
-            print("\n--- [5] Consultar ventas ---")
+            limpiar_pantalla()
+            consultar_ventas()
             pausar()
         elif opcion == "6":
             print("\n--- [6] Alertas de stock ---")

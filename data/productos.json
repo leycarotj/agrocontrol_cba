@@ -7,5 +7,14 @@
         "precio": 3500.0,
         "stock_minimo": 10.0,
         "activo": true
+    },
+    {
+        "codigo": "P002",
+        "nombre": "Tomate",
+        "categoria": "Verdura",
+        "unidad": "unidad",
+        "precio": 500.0,
+        "stock_minimo": 5.0,
+        "activo": true
     }
 ]
