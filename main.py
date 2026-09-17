@@ -75,7 +75,6 @@ def generar_id_movimiento():
     return f"M{siguiente_num:04d}"
 
 def generar_id_venta():
-    """Genera IDs secuenciales para las ventas (ej. V0001)."""
     siguiente_num = len(ventas) + 1
     return f"V{siguiente_num:04d}"
 
@@ -563,7 +562,7 @@ def menu_movimientos():
             print("\nOpción no válida.")
             pausar()
 
-# --- MÓDULO VENTAS (RF10 - RF11) ---
+# --- MÓDULO VENTAS ---
 
 def registrar_venta():
     print("--- [RF10 - RF11] Registrar Nueva Venta ---")
@@ -586,9 +585,9 @@ def registrar_venta():
 
         stock_disponible = calcular_stock(codigo_prod)
         
-        # Descontar lo que ya esté agregándose en el carrito actual
-        cant_ya_agregada = sum(item["cantidad"] for item in items_venta if item["codigo"] == codigo_prod)
-        stock_efectivo = stock_disponible - cant_ya_agregada
+        cant_ya_agregada = sum(item["codigo"] == codigo_prod for item in items_venta)
+        cant_ya_agregada_val = sum(item["cantidad"] for item in items_venta if item["codigo"] == codigo_prod)
+        stock_efectivo = stock_disponible - cant_ya_agregada_val
 
         print(f"Producto: {prod['nombre']} | Precio: ${prod['precio']:.2f} | Stock disponible: {stock_efectivo}")
 
@@ -626,7 +625,6 @@ def registrar_venta():
         print("\nVenta cancelada: No se ingresó ningún producto válido.")
         return
 
-    # Confirmar y Procesar Venta
     id_venta = generar_id_venta()
     fecha_venta = datetime.now().strftime("%Y-%m-%d %H:%M")
 
@@ -645,7 +643,6 @@ def registrar_venta():
 
     ventas.append(nueva_venta)
 
-    # Generar salidas de inventario asociadas
     for it in items_venta:
         mov = {
             "id": generar_id_movimiento(),
@@ -684,6 +681,120 @@ def consultar_ventas():
         print(f"{v['id']:<10} | {v['fecha']:<18} | {num_items:<10} | ${v['total']:<15.2f}")
     print("="*70)
 
+# --- MÓDULO ALERTAS Y REPORTES (RF12 - RF14) ---
+
+def consultar_alertas_stock():
+    print("--- [RF12] Alertas de Stock Bajo o Crítico ---")
+    alertas = []
+
+    for p in productos:
+        if p["activo"]:
+            stk_actual = calcular_stock(p["codigo"])
+            if stk_actual <= p["stock_minimo"]:
+                alertas.append((p, stk_actual))
+
+    if not alertas:
+        print("\n¡Excelente! Todos los productos activos tienen niveles de stock por encima del mínimo de seguridad.")
+        return
+
+    print("\n¡ATENCIÓN! Los siguientes productos requieren reabastecimiento urgente:")
+    print("="*85)
+    print(f"{'CÓDIGO':<10} | {'NOMBRE':<25} | {'STOCK ACTUAL':<14} | {'STOCK MÍNIMO':<14} | {'ESTADO':<15}")
+    print("="*85)
+    for p, stk in alertas:
+        estado = "AGOTADO" if stk == 0 else "STOCK BAJO"
+        print(f"{p['codigo']:<10} | {p['nombre']:<25} | {stk:<14.1f} | {p['stock_minimo']:<14.1f} | {estado:<15}")
+    print("="*85)
+
+def reporte_ingresos_por_fecha():
+    print("--- [RF13] Reporte de Ingresos por Rango de Fechas ---")
+    if not ventas:
+        print("\nNo hay ventas para analizar.")
+        return
+
+    f_inicio = input("Fecha inicial (AAAA-MM-DD) [dejar vacío para ver todo]: ").strip()
+    f_fin = input("Fecha final (AAAA-MM-DD) [dejar vacío para ver todo]: ").strip()
+
+    ventas_filtradas = []
+    total_ingresos = 0.0
+
+    for v in ventas:
+        fecha_v_str = v["fecha"].split(" ")[0]  # Obtener AAAA-MM-DD
+        cumple_inicio = (not f_inicio) or (fecha_v_str >= f_inicio)
+        cumple_fin = (not f_fin) or (fecha_v_str <= f_fin)
+
+        if cumple_inicio and cumple_fin:
+            ventas_filtradas.append(v)
+            total_ingresos += v["total"]
+
+    if not ventas_filtradas:
+        print("\nNo se registraron ventas en el rango de fechas especificado.")
+        return
+
+    print("\n" + "="*70)
+    print(f"REPORTE DE INGRESOS ({f_inicio or 'Inicio'} al {f_fin or 'Actualidad'})")
+    print("="*70)
+    print(f"{'ID VENTA':<10} | {'FECHA / HORA':<18} | {'Nº ÍTEMS':<10} | {'TOTAL ($)':<15}")
+    print("-" * 70)
+    for v in ventas_filtradas:
+        print(f"{v['id']:<10} | {v['fecha']:<18} | {len(v['items']):<10} | ${v['total']:<15.2f}")
+    print("="*70)
+    print(f"TOTAL INGRESOS GENERADOS: ${total_ingresos:.2f}")
+    print("="*70)
+
+def reporte_unidades_vendidas():
+    print("--- [RF14] Reporte de Unidades Vendidas por Producto ---")
+    if not ventas:
+        print("\nNo hay ventas registradas.")
+        return
+
+    resumen_ventas = {}
+
+    for v in ventas:
+        for it in v["items"]:
+            cod = it["codigo"]
+            cant = it["cantidad"]
+            subt = cant * it["precio_unitario"]
+
+            if cod not in resumen_ventas:
+                resumen_ventas[cod] = {"cantidad": 0.0, "recaudado": 0.0}
+
+            resumen_ventas[cod]["cantidad"] += cant
+            resumen_ventas[cod]["recaudado"] += subt
+
+    print("\n" + "="*80)
+    print(f"{'CÓDIGO':<10} | {'NOMBRE PRODUCTO':<25} | {'UNID VENDIDAS':<15} | {'RECAUDADO ($)':<15}")
+    print("="*80)
+    for cod, datos in resumen_ventas.items():
+        prod = buscar_producto(cod)
+        nombre = prod["nombre"] if prod else "Desconocido/Eliminado"
+        print(f"{cod:<10} | {nombre:<25} | {datos['cantidad']:<15.1f} | ${datos['recaudado']:<15.2f}")
+    print("="*80)
+
+def menu_reportes():
+    while True:
+        limpiar_pantalla()
+        print("==================== MÓDULO DE REPORTES ====================")
+        print("1. Reporte de ingresos por rango de fechas [RF13]")
+        print("2. Reporte de unidades vendidas por producto [RF14]")
+        print("0. Volver al menú principal")
+        print("============================================================")
+        opcion = input("Seleccione una opción: ").strip()
+
+        if opcion == "1":
+            limpiar_pantalla()
+            reporte_ingresos_por_fecha()
+            pausar()
+        elif opcion == "2":
+            limpiar_pantalla()
+            reporte_unidades_vendidas()
+            pausar()
+        elif opcion == "0":
+            break
+        else:
+            print("\nOpción no válida.")
+            pausar()
+
 # --- MENÚ PRINCIPAL ---
 
 def mostrar_menu():
@@ -721,11 +832,11 @@ def main():
             consultar_ventas()
             pausar()
         elif opcion == "6":
-            print("\n--- [6] Alertas de stock ---")
+            limpiar_pantalla()
+            consultar_alertas_stock()
             pausar()
         elif opcion == "7":
-            print("\n--- [7] Reportes ---")
-            pausar()
+            menu_reportes()
         elif opcion == "8":
             guardar_todos_los_datos()
             print("\n¡Datos guardados exitosamente en archivos JSON!")
